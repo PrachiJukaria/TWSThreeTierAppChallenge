@@ -5,7 +5,6 @@ const router = express.Router();
 router.post("/", async (req, res) => {
     try {
         const task = await new Task(req.body).save();
-        // chk
         res.send(task);
     } catch (error) {
         res.send(error);
