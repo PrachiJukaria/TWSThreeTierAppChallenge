@@ -1,0 +1,65 @@
+pipeline{
+    agent any
+    environment {
+        IMAGE_TAG = 1.1
+        K8S_MANIFEST_FILE = "./k8s-manifests/backend-deployment.yaml"
+        K8S_MANIFEST_FILE_FRONT = "./k8s-manifests/frontend-deployment.yaml"
+    }
+    
+    stages{
+        stage("login to AWS ECR")
+        {
+            steps{
+                sh "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/d6p5p7z0"
+            }
+        }
+        stage("cloning from git")
+        {
+            steps{
+                git branch: 'main', url: 'https://github.com/PrachiJukaria/TWSThreeTierAppChallenge.git'
+            }
+        }
+        stage("Building Image")
+        {
+            steps{
+                script{
+                    IMAGE_TAG+=0.1
+                    sh "docker build -t 3-tier-backend:${env.BUILD_NUMBER} ./backend/"
+                    sh "docker build -t 3-tier-frontend:${env.BUILD_NUMBER} ./frontend/"
+                }
+            }
+        }
+        stage("Deploy to AWS ECR")
+        {
+            steps{
+                sh "docker tag 3-tier-backend:${IMAGE_TAG} public.ecr.aws/d6p5p7z0/3-tier-backend:${env.BUILD_NUMBER}"
+                sh "docker push public.ecr.aws/d6p5p7z0/3-tier-backend:${env.BUILD_NUMBER}"
+                sh "docker tag 3-tier-frontend:${IMAGE_TAG} public.ecr.aws/d6p5p7z0/3-tier-frontend:${env.BUILD_NUMBER}"
+                sh "docker push public.ecr.aws/d6p5p7z0/3-tier-frontend:${env.BUILD_NUMBER}"
+            }
+        }
+        stage('Update K8S manifest')
+        {
+            steps{
+                script{
+                    def newImage = "public.ecr.aws/d6p5p7z0/3-tier-backend:${env.BUILD_NUMBER}"
+                    def newImageFront = "public.ecr.aws/d6p5p7z0/3-tier-frontend:${env.BUILD_NUMBER}"
+                    sh "sed -i 's#image: .*#image: ${newImage}#' ${K8S_MANIFEST_FILE}"
+                    sh "sed -i 's#image: .*#image: ${newImageFront}#' ${K8S_MANIFEST_FILE_FRONT}"
+            
+                    // Commit and push changes back to the repository
+                    // sh "git remote set-url origin git@github.com:PrachiJukaria/TWSThreeTierAppChallenge.git"
+                    withCredentials([usernamePassword(credentialsId: "gitCredentials", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                        sh 'git remote set-url origin "https://PrachiJukaria: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@github.com/PrachiJukaria/TWSThreeTierAppChallenge.git"'
+                    // sh "git config --global user.name 'PrachiJukaria'"
+                    // sh "git config --global user.password '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'"
+                        sh "git add ${K8S_MANIFEST_FILE} ${K8S_MANIFEST_FILE_FRONT}"
+                        sh "git commit -m 'Update Docker image in Kubernetes manifest'"
+                        sh "git push origin main"
+                    }
+                }
+            }
+        }
+        
+    }
+}
